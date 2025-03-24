@@ -314,50 +314,85 @@ class PlotWindow(QMainWindow):
         return None
 
     def export_data(self):
-        """完整数据导出方法"""
-
-
-        # 获取保存路径
-        save_dir = QFileDialog.getExistingDirectory(self, "选择保存文件夹", "")
-        if not save_dir or not hasattr(self, 'final_mode') or not hasattr(self, 't'):
+        """导出图片和分解结果数据"""
+        # 获取当前地震波名称
+        wave_name = self.earthquake_wave_combo.currentText()
+        if not wave_name or wave_name == "无":
+            QMessageBox.warning(self, "警告", "请先选择地震波")
             return
 
-        # 处理特殊字符文件名
-        wave_name = self.earthquake_wave_combo.currentText()
-        safe_name = wave_name.replace(" ", "_").translate(str.maketrans('/\\', '--', ''))
+        # 手动选择保存目录
+        save_dir = QFileDialog.getExistingDirectory(self, "选择保存文件夹", "")
+        if not save_dir:  # 用户取消选择
+            return
 
-        img2_path = os.path.join(save_dir, f"{safe_name}_Decomposition_result.png")
-        excel_path = os.path.join(save_dir, f"{safe_name}_StableMode.xlsx")
+        try:
+            # ================== 保存图片 ==================
+            # 生成安全文件名（替换特殊字符）
+            safe_name = wave_name.replace(" ", "_").replace("/", "-").replace("\\", "-")
 
-        if hasattr(self, 'final_mode') and hasattr(self, 't'):  # 确保必要数据存在
+            # 保存ax2对应的图片
+            has_final_mode = self.final_mode is not None and len(self.final_mode) > 0
+            # 保存ax2对应的图片
+            if has_final_mode:
+                fig2 = plt.figure(figsize=(8, 4))
+                ax2_new = fig2.add_subplot(111)
 
-            # 保存分解结果图
-            fig2 = plt.figure(figsize=(10, 4))
-            ax2 = fig2.add_subplot(111)
-            ax2.plot(self.t, self.vel, color='gray', alpha=0.6, linewidth=1, label='Original Velocity')
-            if self.final_mode.size > 0:
-                min_length = min(len(self.final_mode), len(self.t))
-                ax2.plot(self.t[:min_length], self.final_mode[:min_length],
-                         color='#FF5733', linewidth=1,
-                         label=f'E-VMD')
-            ax2.set_xlabel("Time (s)", fontsize=12)
-            ax2.set_title(f"{safe_name}", fontsize=12)
-            ax2.legend(loc='upper right')
-            ax2.set_xlim(self.t.min(), self.t.max())
-            fig2.savefig(img2_path, dpi=300, bbox_inches='tight')
-            plt.close(fig2)
+                # 重新绘制ax2内容
+                min_len = min(len(self.t), len(self.final_mode))
+                ax2_new.plot(self.t, self.vel,
+                             color='gray',
+                             linewidth=1,
+                             alpha=0.5,
+                             label='Original Velocity')
+                ax2_new.plot(self.t[:min_len],
+                             self.final_mode[:min_len],
+                             color='#FF5733',
+                             linewidth=1,
+                             label=f'E-VMD')
 
-            # 保存Excel数据
-            min_length = min(len(self.t), len(self.final_mode))
-            try:
-                DataFrame({
-                    'Time(s)': self.t[:min_length],
-                    'StableMode': self.final_mode[:min_length]
-                }).to_excel(excel_path, index=False, engine='openpyxl')
-            except Exception as e:
-                print(f"Excel保存失败: {str(e)}")
-        else:
-            print("缺少必要数据，请先完成分析")
+                # 设置ax2样式
+                ax2_new.set_xlim(self.t.min(), self.t.max())
+                # 原代码
+
+                # 修改后代码 (添加位置参数)
+                ax2_new.set_title(f"{safe_name}",
+                                  fontsize=10,
+                                  y=-0.25,  # 控制垂直位置 (负值表示下方)
+                                  pad=20,  # 标题与坐标轴的间距
+                                  loc='center')  # 水平居中
+                ax2_new.legend()
+                ax2_new.grid(False)
+
+                # 保存图片
+                img2_path = os.path.join(save_dir, f"{safe_name}_Decomposition_result.png")
+                fig2.savefig(img2_path, dpi=300, bbox_inches='tight')
+                plt.close(fig2)
+
+            # ================== 保存Excel数据 ==================
+            if has_final_mode:
+                # 添加数组有效性检查
+                if len(self.t) == 0 or len(self.final_mode) == 0:
+                    QMessageBox.warning(self, "警告", "稳定模态数据为空")
+                    return
+
+                # 创建数据表格
+                min_len = min(len(self.t), len(self.final_mode))
+                df = pd.DataFrame({
+                    f'{safe_name}_Time(s)': self.t[:min_len],
+                    f'{safe_name}_StableMode': self.final_mode[:min_len]
+                })
+
+                # 保存Excel文件
+                excel_path = os.path.join(save_dir, f"{safe_name}_StableMode.xlsx")
+                df.to_excel(excel_path, index=False)
+
+            success_msg = f"数据已保存至:\n{img2_path}"
+            if has_final_mode:
+                success_msg += f"\n{img2_path}\n{excel_path}"
+            QMessageBox.information(self, "导出成功", success_msg)
+        except Exception as e:
+            QMessageBox.critical(self, "导出错误", f"导出失败: {str(e)}")
 
     def load_data(self):
         """主数据处理流程"""
@@ -425,6 +460,8 @@ class PlotWindow(QMainWindow):
                 time_data=self.t,
                 filtered_result=best_result
             )
+
+            self.final_mode = final_mode
 
             # 结果可视化
             self._plot_results(
